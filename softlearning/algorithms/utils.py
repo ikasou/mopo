@@ -30,11 +30,19 @@ def create_MOPO_algorithm(variant, *args, **kwargs):
 
     return algorithm
 
+def create_COMBO_algorithm(variant, *args, **kwargs):
+    from mopo.algorithms.combo import COMBO
+
+    algorithm = COMBO(*args, **kwargs)
+
+    return algorithm
+
 
 ALGORITHM_CLASSES = {
     'SAC': create_SAC_algorithm,
     'SQL': create_SQL_algorithm,
     'MOPO': create_MOPO_algorithm,
+    'COMBO': create_COMBO_algorithm,
 }
 
 

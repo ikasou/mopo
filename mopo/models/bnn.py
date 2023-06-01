@@ -46,9 +46,9 @@ class BNN:
 
         print('[ BNN ] Initializing model: {} | {} networks | {} elites'.format(params['name'], params['num_networks'], params['num_elites']))
         if params.get('sess', None) is None:
-            config = tf.ConfigProto()
+            config = tf.compat.v1.ConfigProto()
             # config.gpu_options.allow_growth = True
-            self._sess = tf.Session(config=config)
+            self._sess = tf.compat.v1.Session(config=config)
         else:
             self._sess = params.get('sess')
 
@@ -192,33 +192,33 @@ class BNN:
 
             # Construct all variables.
             with self.sess.as_default():
-                with tf.variable_scope(self.name):
+                with tf.compat.v1.variable_scope(self.name):
                     self.scaler = TensorStandardScaler(self.layers[0].get_input_dim())
                     self.max_logvar = tf.Variable(np.ones([1, self.layers[-1].get_output_dim() // 2])/2., dtype=tf.float32,
                                                   name="max_log_var")
                     self.min_logvar = tf.Variable(-np.ones([1, self.layers[-1].get_output_dim() // 2])*10., dtype=tf.float32,
                                                   name="min_log_var")
                     for i, layer in enumerate(self.layers):
-                        with tf.variable_scope("Layer%i" % i):
+                        with tf.compat.v1.variable_scope("Layer%i" % i):
                             layer.construct_vars()
                             self.decays.extend(layer.get_decays())
                             self.optvars.extend(layer.get_vars())
         else:
             # Construct all variables.
             with self.sess.as_default():
-                with tf.variable_scope(self.name):
+                with tf.compat.v1.variable_scope(self.name):
                     self.scaler = TensorStandardScaler(self.layers[0].get_input_dim())
                     self.max_logvar = tf.Variable(np.ones([1, self.var_layers[-1].get_output_dim()])/2., dtype=tf.float32,
                                                   name="max_log_var")
                     self.min_logvar = tf.Variable(-np.ones([1, self.var_layers[-1].get_output_dim()])*10., dtype=tf.float32,
                                                   name="min_log_var")
                     for i, layer in enumerate(self.layers):
-                        with tf.variable_scope("Layer%i_mean" % i):
+                        with tf.compat.v1.variable_scope("Layer%i_mean" % i):
                             layer.construct_vars()
                             self.decays.extend(layer.get_decays())
                             self.optvars.extend(layer.get_vars())
                     for i, layer in enumerate(self.var_layers):
-                        with tf.variable_scope("Layer%i_var" % i):
+                        with tf.compat.v1.variable_scope("Layer%i_var" % i):
                             layer.construct_vars()
                             self.decays.extend(layer.get_decays())
                             self.optvars.extend(layer.get_vars())
@@ -226,17 +226,17 @@ class BNN:
         self.nonoptvars.extend(self.scaler.get_vars())
 
         # Set up training
-        with tf.variable_scope(self.name):
+        with tf.compat.v1.variable_scope(self.name):
             self.optimizer = optimizer(**optimizer_args)
-            self.sy_train_in = tf.placeholder(dtype=tf.float32,
+            self.sy_train_in = tf.compat.v1.placeholder(dtype=tf.float32,
                                               shape=[self.num_nets, None, self.layers[0].get_input_dim()],
                                               name="training_inputs")
             if not self.separate_mean_var:
-                self.sy_train_targ = tf.placeholder(dtype=tf.float32,
+                self.sy_train_targ = tf.compat.v1.placeholder(dtype=tf.float32,
                                                     shape=[self.num_nets, None, self.layers[-1].get_output_dim() // 2],
                                                     name="training_targets")
             else:
-                self.sy_train_targ = tf.placeholder(dtype=tf.float32,
+                self.sy_train_targ = tf.compat.v1.placeholder(dtype=tf.float32,
                                                     shape=[self.num_nets, None, self.layers[-1].get_output_dim()],
                                                     name="training_targets")
             if not self.deterministic:
@@ -250,11 +250,11 @@ class BNN:
             self.train_op = self.optimizer.minimize(train_loss, var_list=self.optvars)
 
         # Initialize all variables
-        self.sess.run(tf.variables_initializer(self.optvars + self.nonoptvars + self.optimizer.variables()))
+        self.sess.run(tf.compat.v1.variables_initializer(self.optvars + self.nonoptvars + self.optimizer.variables()))
 
         # Set up prediction
-        with tf.variable_scope(self.name):
-            self.sy_pred_in2d = tf.placeholder(dtype=tf.float32,
+        with tf.compat.v1.variable_scope(self.name):
+            self.sy_pred_in2d = tf.compat.v1.placeholder(dtype=tf.float32,
                                                shape=[None, self.layers[0].get_input_dim()],
                                                name="2D_training_inputs")
             self.sy_pred_mean2d_fac, self.sy_pred_var2d_fac = \
@@ -263,7 +263,7 @@ class BNN:
             self.sy_pred_var2d = tf.reduce_mean(self.sy_pred_var2d_fac, axis=0) + \
                 tf.reduce_mean(tf.square(self.sy_pred_mean2d_fac - self.sy_pred_mean2d), axis=0)
 
-            self.sy_pred_in3d = tf.placeholder(dtype=tf.float32,
+            self.sy_pred_in3d = tf.compat.v1.placeholder(dtype=tf.float32,
                                                shape=[self.num_nets, None, self.layers[0].get_input_dim()],
                                                name="3D_training_inputs")
             self.sy_pred_mean3d_fac, self.sy_pred_var3d_fac = \

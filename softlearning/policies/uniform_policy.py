@@ -31,7 +31,7 @@ class UniformPolicy(BasePolicy):
         self.actions_input = tf.keras.Input(shape=output_shape)
 
         log_pis = tf.keras.layers.Lambda(
-            lambda x: tf.tile(tf.log([
+            lambda x: tf.tile(tf.compat.v1.log([
                 (action_range[1] - action_range[0]) / 2.0
             ])[None], (tf.shape(x)[0], 1))
         )(self.actions_input)

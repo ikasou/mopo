@@ -39,7 +39,7 @@ def construct_model(obs_dim=11, act_dim=3, rew_dim=1, hidden_dim=200, num_networ
 	if load_dir is not None:
 		model.model_loaded = True
 
-	model.finalize(tf.train.AdamOptimizer, {"learning_rate": 0.001})
+	model.finalize(tf.compat.v1.train.AdamOptimizer, {"learning_rate": 0.001})
 	print('[ BNN ] Model: {}'.format(model))
 	return model
 

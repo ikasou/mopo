@@ -29,13 +29,13 @@ def td_target(reward, discount, next_value):
     return reward + discount * next_value
 
 
-class MOPO(RLAlgorithm):
-    """Model-based Offline Policy Optimization (MOPO)
+class COMBO(RLAlgorithm):
+    """Model-based Offline Policy Optimization (COMBO)
 
     References
     ----------
         Tianhe Yu, Garrett Thomas, Lantao Yu, Stefano Ermon, James Zou, Sergey Levine, Chelsea Finn, Tengyu Ma. 
-        MOPO: Model-based Offline Policy Optimization. 
+        COMBO: Model-based Offline Policy Optimization. 
         arXiv preprint arXiv:2005.13239. 2020.
     """
 
@@ -60,14 +60,14 @@ class MOPO(RLAlgorithm):
             reparameterize=False,
             store_extra_policy_info=False,
 
-            deterministic=False,
+            deterministic=True,    # No uncertainty penalty for CQL
             rollout_random=False,
             model_train_freq=250,
-            num_networks=7,
-            num_elites=5,
+            num_networks=1,
+            num_elites=None,
             model_retain_epochs=20,
             rollout_batch_size=100e3,
-            real_ratio=0.1,
+            real_ratio=0.5,      # 50-50 for CQL?
             # rollout_schedule=[20,100,1,1],
             rollout_length=1,
             hidden_dim=200,
@@ -80,8 +80,10 @@ class MOPO(RLAlgorithm):
             pool_load_max_size=0,
             model_name=None,
             model_load_dir=None,
-            penalty_coeff=0.,
+            penalty_coeff=0.0,   # No penalty
             penalty_learned_var=False,
+            beta=.1, # cql regularizer weight
+            num_cql_random_actions=10, # for CQL uniform sampling
             **kwargs,
     ):
         """
@@ -106,7 +108,7 @@ class MOPO(RLAlgorithm):
                 a likelihood ratio based estimator otherwise.
         """
 
-        super(MOPO, self).__init__(**kwargs)
+        super(COMBO, self).__init__(**kwargs)
 
         obs_dim = np.prod(training_environment.active_observation_shape)
         act_dim = np.prod(training_environment.action_space.shape)
@@ -153,7 +155,7 @@ class MOPO(RLAlgorithm):
             -np.prod(self._training_environment.action_space.shape)
             if target_entropy == 'auto'
             else target_entropy)
-        print('[ MOPO ] Target entropy: {}'.format(self._target_entropy))
+        print('[ COMBO ] Target entropy: {}'.format(self._target_entropy))
 
         self._discount = discount
         self._tau = tau
@@ -170,7 +172,8 @@ class MOPO(RLAlgorithm):
         self._observation_shape = observation_shape
         assert len(action_shape) == 1, action_shape
         self._action_shape = action_shape
-
+        self._beta = beta
+        self._num_cql_random_actions = num_cql_random_actions
         self._build()
 
         #### load replay pool data
@@ -179,7 +182,7 @@ class MOPO(RLAlgorithm):
 
         loader.restore_pool(self._pool, self._pool_load_path, self._pool_load_max_size, save_path=self._log_dir)
         self._init_pool_size = self._pool.size
-        print('[ MOPO ] Starting with pool size: {}'.format(self._init_pool_size))
+        print('[ COMBO ] Starting with pool size: {}'.format(self._init_pool_size))
         ####
 
     def _build(self):
@@ -219,8 +222,8 @@ class MOPO(RLAlgorithm):
         self._training_before_hook()
 
         #### model training
-        print('[ MOPO ] log_dir: {} | ratio: {}'.format(self._log_dir, self._real_ratio))
-        print('[ MOPO ] Training model at epoch {} | freq {} | timestep {} (total: {})'.format(
+        print('[ COMBO ] log_dir: {} | ratio: {}'.format(self._log_dir, self._real_ratio))
+        print('[ COMBO ] Training model at epoch {} | freq {} | timestep {} (total: {})'.format(
             self._epoch, self._model_train_freq, self._timestep, self._total_timestep)
         )
 
@@ -348,13 +351,13 @@ class MOPO(RLAlgorithm):
     def _log_model(self):
         print('MODEL: {}'.format(self._model_type))
         if self._model_type == 'identity':
-            print('[ MOPO ] Identity model, skipping save')
+            print('[ COMBO ] Identity model, skipping save')
         elif self._model.model_loaded:
-            print('[ MOPO ] Loaded model, skipping save')
+            print('[ COMBO ] Loaded model, skipping save')
         else:
             save_path = os.path.join(self._log_dir, 'models')
             filesystem.mkdir(save_path)
-            print('[ MOPO ] Saving model to: {}'.format(save_path))
+            print('[ COMBO ] Saving model to: {}'.format(save_path))
             self._model.save(save_path, self._total_timestep)
 
     def _set_rollout_length(self):
@@ -380,13 +383,13 @@ class MOPO(RLAlgorithm):
         new_pool_size = self._model_retain_epochs * model_steps_per_epoch
 
         if not hasattr(self, '_model_pool'):
-            print('[ MOPO ] Initializing new model pool with size {:.2e}'.format(
+            print('[ COMBO ] Initializing new model pool with size {:.2e}'.format(
                 new_pool_size
             ))
             self._model_pool = SimpleReplayPool(obs_space, act_space, new_pool_size)
         
         elif self._model_pool._max_size != new_pool_size:
-            print('[ MOPO ] Updating model pool | {:.2e} --> {:.2e}'.format(
+            print('[ COMBO ] Updating model pool | {:.2e} --> {:.2e}'.format(
                 self._model_pool._max_size, new_pool_size
             ))
             samples = self._model_pool.return_all_samples()
@@ -397,7 +400,7 @@ class MOPO(RLAlgorithm):
 
     def _train_model(self, **kwargs):
         if self._model_type == 'identity':
-            print('[ MOPO ] Identity model, skipping model')
+            print('[ COMBO ] Identity model, skipping model')
             model_metrics = {}
         else:
             env_samples = self._pool.return_all_samples()
@@ -497,43 +500,43 @@ class MOPO(RLAlgorithm):
         self._iteration_ph = tf.compat.v1.placeholder(
             tf.int64, shape=None, name='iteration')
 
-        self._observations_ph = tf.placeholder(
+        self._observations_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, *self._observation_shape),
             name='observation',
         )
 
-        self._next_observations_ph = tf.placeholder(
+        self._next_observations_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, *self._observation_shape),
             name='next_observation',
         )
 
-        self._actions_ph = tf.placeholder(
+        self._actions_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, *self._action_shape),
             name='actions',
         )
 
-        self._rewards_ph = tf.placeholder(
+        self._rewards_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, 1),
             name='rewards',
         )
 
-        self._terminals_ph = tf.placeholder(
+        self._terminals_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, 1),
             name='terminals',
         )
 
         if self._store_extra_policy_info:
-            self._log_pis_ph = tf.placeholder(
+            self._log_pis_ph = tf.compat.v1.placeholder(
                 tf.float32,
                 shape=(None, 1),
                 name='log_pis',
             )
-            self._raw_actions_ph = tf.placeholder(
+            self._raw_actions_ph = tf.compat.v1.placeholder(
                 tf.float32,
                 shape=(None, *self._action_shape),
                 name='raw_actions',
@@ -572,17 +575,35 @@ class MOPO(RLAlgorithm):
         Q_values = self._Q_values = tuple(
             Q([self._observations_ph, self._actions_ph])
             for Q in self._Qs)
-
+        
+        beta = self._beta = tf.compat.v1.get_variable(
+            'beta',
+            dtype=tf.float32,
+            initializer=self._beta)
+        batch_size = tf.shape(Q_values[0])[0]
+        CQL_Q_losses = tuple(
+            tf.reduce_logsumexp(
+                tf.stack(
+                    tuple(Q([self._observations_ph, 
+                             tf.random.uniform(shape=(batch_size, *self._action_shape), minval=-1, maxval=1)])
+                    for _ in range(self._num_cql_random_actions)),
+                    axis=1
+                ),
+                axis=1
+            ) - Q_values[i]
+            for i, Q in enumerate(self._Qs))
+            
         Q_losses = self._Q_losses = tuple(
-            tf.losses.mean_squared_error(
+            beta*tf.compat.v1.reduce_mean(CQL_Q_losses[i]) + tf.compat.v1.losses.mean_squared_error(
                 labels=Q_target, predictions=Q_value, weights=0.5)
-            for Q_value in Q_values)
+            for i, Q_value in enumerate(Q_values))
 
         self._Q_optimizers = tuple(
             tf.compat.v1.train.AdamOptimizer(
                 learning_rate=self._Q_lr,
                 name='{}_{}_optimizer'.format(Q._name, i)
             ) for i, Q in enumerate(self._Qs))
+        
         Q_training_ops = tuple(
             tf.contrib.layers.optimize_loss(
                 Q_loss,
@@ -738,10 +759,11 @@ class MOPO(RLAlgorithm):
 
         feed_dict = self._get_feed_dict(iteration, batch)
 
-        (Q_values, Q_losses, alpha, global_step) = self._session.run(
+        (Q_values, Q_losses, alpha, beta, global_step) = self._session.run(
             (self._Q_values,
              self._Q_losses,
              self._alpha,
+             self._beta,
              self.global_step),
             feed_dict)
 
@@ -750,6 +772,7 @@ class MOPO(RLAlgorithm):
             'Q-std': np.std(Q_values),
             'Q_loss': np.mean(Q_losses),
             'alpha': alpha,
+            'beta': beta
         })
 
         policy_diagnostics = self._policy.get_diagnostics(

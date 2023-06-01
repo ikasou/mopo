@@ -26,17 +26,17 @@ class ExperimentRunner(tune.Trainable):
 
         self._variant = variant
 
-        gpu_options = tf.GPUOptions(allow_growth=True)
-        session = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-        tf.keras.backend.set_session(session)
-        self._session = tf.keras.backend.get_session()
+        gpu_options = tf.compat.v1.GPUOptions(allow_growth=True)
+        session = tf.compat.v1.Session(config=tf.compat.v1.ConfigProto(gpu_options=gpu_options))
+        tf.compat.v1.keras.backend.set_session(session)
+        self._session = tf.compat.v1.keras.backend.get_session()
 
         self.train_generator = None
         self._built = False
 
     def _stop(self):
-        tf.reset_default_graph()
-        tf.keras.backend.clear_session()
+        tf.compat.v1.reset_default_graph()
+        tf.compat.v1.keras.backend.clear_session()
 
     def _build(self):
         variant = copy.deepcopy(self._variant)

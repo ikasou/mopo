@@ -54,12 +54,12 @@ class TensorStandardScaler:
         Returns: None.
         """
         self.fitted = False
-        with tf.variable_scope("Scaler"):
-            self.mu = tf.get_variable(
+        with tf.compat.v1.variable_scope("Scaler"):
+            self.mu = tf.compat.v1.get_variable(
                 name="scaler_mu", shape=[1, x_dim], initializer=tf.constant_initializer(0.0),
                 trainable=False
             )
-            self.sigma = tf.get_variable(
+            self.sigma = tf.compat.v1.get_variable(
                 name="scaler_std", shape=[1, x_dim], initializer=tf.constant_initializer(1.0),
                 trainable=False
             )

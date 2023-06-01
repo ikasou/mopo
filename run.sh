@@ -1,1 +1,1 @@
-mopo run_local examples.development --config=examples.config.halfcheetah.off_policy --gpus=1 --trial-gpus=1 --checkpoint-frequency=50
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/ikasou/.mujoco/mujoco210/bin:/usr/local/nvidia/lib64 mopo run_local examples.development --config=examples.config.d4rl.hopper_medium --gpus=2 --trial-gpus=2 --checkpoint-frequency=50

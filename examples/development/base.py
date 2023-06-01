@@ -55,6 +55,20 @@ ALGORITHM_PARAMS_ADDITIONAL = {
             'n_initial_exploration_steps': int(5000),
         }
     },
+    'COMBO': {
+        'type': 'COMBO',
+        'kwargs': {
+            'reparameterize': REPARAMETERIZE,
+            'lr': 3e-4,
+            'target_update_interval': 1,
+            'tau': 5e-3,
+            'store_extra_policy_info': False,
+            'action_prior': 'uniform',
+            'n_initial_exploration_steps': int(5000),
+            'num_networks': 1,
+            'num_elites': None,       
+        }
+    },
     'SQL': {
         'type': 'SQL',
         'kwargs': {
@@ -95,6 +109,7 @@ ALGORITHM_PARAMS_ADDITIONAL = {
             'n_initial_exploration_steps': int(5000),
         }
     },
+    
 }
 
 DEFAULT_NUM_EPOCHS = 200

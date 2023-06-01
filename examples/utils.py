@@ -232,6 +232,7 @@ def get_parser(allow_policy_list=False):
     parser.add_argument(
         '--config',
         type=str)
+    
     # parser.add_argument(
     #     '--task', type=str, choices=AVAILABLE_TASKS, default=DEFAULT_TASK)
 
