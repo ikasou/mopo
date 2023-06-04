@@ -4,7 +4,7 @@ params = deepcopy(mopo_params)
 params.update({
     'domain': 'hopper',
     'task': 'random-v0',
-    'exp_name': 'hopper_random'
+    'exp_name': 'hopper_random_MOPO'
 })
 params['kwargs'].update({
     'pool_load_path': 'd4rl/hopper-random-v0',

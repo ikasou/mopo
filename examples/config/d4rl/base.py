@@ -1,8 +1,7 @@
 base_params = {
-    'type': 'MOPO',
     'universe': 'gym',
 
-    'log_dir': './ray_mopo/', # Specify where to write log files here
+    'log_dir': './ray_logs/', # Specify where to write log files here
 
     'kwargs': {
         'epoch_length': 1000,

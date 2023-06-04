@@ -7,8 +7,6 @@ from collections import OrderedDict
 from numbers import Number
 from itertools import count
 import gtimer as gt
-import pdb
-
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.training import training_util
@@ -60,14 +58,14 @@ class COMBO(RLAlgorithm):
             reparameterize=False,
             store_extra_policy_info=False,
 
-            deterministic=True,    # No uncertainty penalty for CQL
+            deterministic=False,
             rollout_random=False,
             model_train_freq=250,
-            num_networks=1,
-            num_elites=None,
+            num_networks=7,
+            num_elites=5,
             model_retain_epochs=20,
             rollout_batch_size=100e3,
-            real_ratio=0.5,      # 50-50 for CQL?
+            real_ratio=0.05,      # 50-50 for CQL?
             # rollout_schedule=[20,100,1,1],
             rollout_length=1,
             hidden_dim=200,
@@ -83,6 +81,7 @@ class COMBO(RLAlgorithm):
             penalty_coeff=0.0,   # No penalty
             penalty_learned_var=False,
             beta=.1, # cql regularizer weight
+            temperature=1.0,
             num_cql_random_actions=10, # for CQL uniform sampling
             **kwargs,
     ):
@@ -173,6 +172,7 @@ class COMBO(RLAlgorithm):
         assert len(action_shape) == 1, action_shape
         self._action_shape = action_shape
         self._beta = beta
+        self._temperature = temperature
         self._num_cql_random_actions = num_cql_random_actions
         self._build()
 
@@ -228,7 +228,8 @@ class COMBO(RLAlgorithm):
         )
 
         max_epochs = 1 if self._model.model_loaded else None
-        model_train_metrics = self._train_model(batch_size=256, max_epochs=max_epochs, holdout_ratio=0.2, max_t=self._max_model_t)
+        model_train_metrics = self._train_model(batch_size=256, max_epochs=max_epochs, 
+                                                holdout_ratio=0.2, max_t=self._max_model_t)
         model_metrics.update(model_train_metrics)
         self._log_model()
         gt.stamp('epoch_train_model')
@@ -256,7 +257,8 @@ class COMBO(RLAlgorithm):
                     self._training_progress.pause()
                     self._set_rollout_length()
                     self._reallocate_model_pool()
-                    model_rollout_metrics = self._rollout_model(rollout_batch_size=self._rollout_batch_size, deterministic=self._deterministic)
+                    model_rollout_metrics = self._rollout_model(rollout_batch_size=self._rollout_batch_size, 
+                                                                deterministic=self._deterministic)
                     model_metrics.update(model_rollout_metrics)
                     
                     gt.stamp('epoch_rollout_model')
@@ -552,7 +554,7 @@ class COMBO(RLAlgorithm):
             for Q in self._Q_targets)
 
         min_next_Q = tf.reduce_min(next_Qs_values, axis=0)
-        next_value = min_next_Q - self._alpha * next_log_pis
+        next_value = min_next_Q - self._alpha * next_log_pis  # SAC Max Entropy
 
         Q_target = td_target(
             reward=self._reward_scale * self._rewards_ph,
@@ -576,26 +578,71 @@ class COMBO(RLAlgorithm):
             Q([self._observations_ph, self._actions_ph])
             for Q in self._Qs)
         
-        beta = self._beta = tf.compat.v1.get_variable(
-            'beta',
-            dtype=tf.float32,
-            initializer=self._beta)
+        beta = tf.compat.v1.constant(value = self._beta, dtype=tf.float32, name='beta')
+        temperature = tf.compat.v1.constant(value = self._temperature, dtype=tf.float32, name='temperature')
         batch_size = tf.shape(Q_values[0])[0]
-        CQL_Q_losses = tuple(
-            tf.reduce_logsumexp(
-                tf.stack(
-                    tuple(Q([self._observations_ph, 
-                             tf.random.uniform(shape=(batch_size, *self._action_shape), minval=-1, maxval=1)])
-                    for _ in range(self._num_cql_random_actions)),
-                    axis=1
-                ),
-                axis=1
-            ) - Q_values[i]
-            for i, Q in enumerate(self._Qs))
+        random_actions_all = tuple(
+            tf.random.uniform(shape=(batch_size, *self._action_shape), minval=-1, maxval=1)
+            for _ in range(self._num_cql_random_actions))
+        random_actions_Q_values = tuple(
+            tf.concat(tuple(
+                Q([self._observations_ph, random_actions])
+                for random_actions in random_actions_all), -1)
+            for _, Q in enumerate(self._Qs))
+        # CQL_Q_losses = self._CQL_Q_losses = tuple(
+        #     tf.reduce_logsumexp(
+        #         tf.stack(
+        #             tuple(Q([self._observations_ph, random_actions])/temperature
+        #             for random_actions in random_actions_all),
+        #             axis=1
+        #         ),
+        #         axis=1
+        #     )*temperature - Q_values[i]
+        #     for i, Q in enumerate(self._Qs))
             
+        ###########################################################
+        curr_actions_all = tuple(
+            self._policy.actions([self._observations_ph])
+            for _ in range(self._num_cql_random_actions))
+        curr_log_pis_all = tuple(
+            self._policy.log_pis([self._observations_ph], curr_actions)
+            for curr_actions in curr_actions_all)       
+        next_actions_all = tuple(
+            self._policy.actions([self._next_observations_ph])
+            for _ in range(self._num_cql_random_actions))
+        next_log_pis_all = tuple(
+            self._policy.log_pis([self._next_observations_ph], next_actions)
+            for next_actions in next_actions_all)
+        curr_actions_Q_values = tuple(
+            tf.concat(tuple(
+                Q([self._observations_ph, curr_actions])
+                for curr_actions in curr_actions_all), -1)
+            for _, Q in enumerate(self._Qs))
+        next_actions_Q_values = tuple(
+            tf.concat(tuple(
+                Q([self._next_observations_ph, next_actions])
+                for next_actions in next_actions_all), -1)
+            for _, Q in enumerate(self._Qs))
+        all_stacked_Q_values = tuple(
+            tf.concat((
+                random_actions_Q_values[i],
+                Q_values[i],
+                next_actions_Q_values[i],
+                curr_actions_Q_values[i]), -1)
+            for i, _ in enumerate(Q_values))
+        CQL_Q_losses = self._CQL_Q_losses = tuple(
+            tf.reduce_logsumexp(
+                all_stacked_Q_values[i]/temperature,
+                axis=1
+            )*temperature - Q_value
+            for i, Q_value in enumerate(Q_values)) 
+        ###########################################################
+
         Q_losses = self._Q_losses = tuple(
-            beta*tf.compat.v1.reduce_mean(CQL_Q_losses[i]) + tf.compat.v1.losses.mean_squared_error(
-                labels=Q_target, predictions=Q_value, weights=0.5)
+            tf.math.add(
+                beta*tf.compat.v1.reduce_mean(CQL_Q_losses[i]),
+                tf.compat.v1.losses.mean_squared_error(
+                    labels=Q_target, predictions=Q_value, weights=0.5))
             for i, Q_value in enumerate(Q_values))
 
         self._Q_optimizers = tuple(
@@ -759,11 +806,10 @@ class COMBO(RLAlgorithm):
 
         feed_dict = self._get_feed_dict(iteration, batch)
 
-        (Q_values, Q_losses, alpha, beta, global_step) = self._session.run(
+        (Q_values, Q_losses, alpha, global_step) = self._session.run(
             (self._Q_values,
              self._Q_losses,
              self._alpha,
-             self._beta,
              self.global_step),
             feed_dict)
 
@@ -772,7 +818,6 @@ class COMBO(RLAlgorithm):
             'Q-std': np.std(Q_values),
             'Q_loss': np.mean(Q_losses),
             'alpha': alpha,
-            'beta': beta
         })
 
         policy_diagnostics = self._policy.get_diagnostics(

@@ -165,8 +165,8 @@ def add_ray_tune_args(parser):
     parser.add_argument(
         '--trial-name-template',
         type=str,
-        default='seed:{trial.config[run_params][seed]}',
-        # default='id={trial.trial_id}-seed={trial.config[run_params][seed]}',
+        # default='seed:{trial.config[run_params][seed]}',
+        default='{trial.config[algorithm_params][exp_name]}',
         help=tune_help_string(
             "Optional string template for trial name. For example:"
             " '{trial.trial_id}-seed={trial.config[run_params][seed]}'"))
@@ -247,11 +247,12 @@ def get_parser(allow_policy_list=False):
               " constructed) piece by piece so that each"
               " experience is saved only once."))
 
-    # parser.add_argument(
-    #     '--algorithm',
-    #     type=str,
-    #     choices=AVAILABLE_ALGORITHMS,
-    #     default=DEFAULT_ALGORITHM)
+    parser.add_argument(
+        '--algorithm',
+        type=str,
+        choices=AVAILABLE_ALGORITHMS,
+        default=DEFAULT_ALGORITHM)
+    
     if allow_policy_list:
         parser.add_argument(
             '--policy',

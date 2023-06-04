@@ -65,8 +65,6 @@ ALGORITHM_PARAMS_ADDITIONAL = {
             'store_extra_policy_info': False,
             'action_prior': 'uniform',
             'n_initial_exploration_steps': int(5000),
-            'num_networks': 1,
-            'num_elites': None,       
         }
     },
     'SQL': {
@@ -239,6 +237,7 @@ def get_variant_spec_base(universe, domain, task, policy, algorithm, env_params)
         env_params,
         ALGORITHM_PARAMS_PER_DOMAIN.get(domain, {})
     )
+    assert algorithm == algorithm_params['type']   # sanity...
     algorithm_params = deep_update(
         algorithm_params,
         ALGORITHM_PARAMS_ADDITIONAL.get(algorithm, {})
@@ -254,11 +253,19 @@ def get_variant_spec_base(universe, domain, task, policy, algorithm, env_params)
                 'kwargs': (
                     ENVIRONMENT_PARAMS.get(domain, {}).get(task, {})),
             },
-            'evaluation': tune.sample_from(lambda spec: (
-                spec.get('config', spec)
-                ['environment_params']
-                ['training']
-            )),
+        #     'evaluation': tune.sample_from(lambda spec: (
+        #         spec.get('config', spec)
+        #         ['environment_params']
+        #         ['training']
+        #     )),
+        # },
+            'evaluation': {
+                'domain': domain,
+                'task': task,
+                'universe': universe,
+                'kwargs': (
+                    ENVIRONMENT_PARAMS.get(domain, {}).get(task, {})),
+            },
         },
         'policy_params': deep_update(
             POLICY_PARAMS_BASE[policy],
@@ -274,7 +281,8 @@ def get_variant_spec_base(universe, domain, task, policy, algorithm, env_params)
         'replay_pool_params': {
             'type': 'SimpleReplayPool',
             'kwargs': {
-                'max_size': tune.sample_from(lambda spec: (
+                'max_size': tune.sample_from(lambda spec: 
+                max(
                     {
                         'SimpleReplayPool': int(1e6),
                         'TrajectoryReplayPool': int(1e4),
@@ -282,7 +290,13 @@ def get_variant_spec_base(universe, domain, task, policy, algorithm, env_params)
                         spec.get('config', spec)
                         ['replay_pool_params']
                         ['type'],
-                        int(1e6))
+                        int(1e6)),
+                    int(spec.get('config', spec)
+                        ['algorithm_params']
+                        ['kwargs']
+                        .get(
+                            'pool_load_max_size',
+                            int(1e6))),
                 )),
             }
         },
@@ -311,7 +325,7 @@ def get_variant_spec_base(universe, domain, task, policy, algorithm, env_params)
 def get_variant_spec(args, env_params):
     universe, domain, task = env_params.universe, env_params.domain, env_params.task
     variant_spec = get_variant_spec_base(
-        universe, domain, task, args.policy, env_params.type, env_params)
+        universe, domain, task, args.policy, args.algorithm, env_params) #env_params.type, env_params)
 
     if args.checkpoint_replay_pool is not None:
         variant_spec['run_params']['checkpoint_replay_pool'] = (

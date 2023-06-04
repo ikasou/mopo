@@ -4,7 +4,7 @@ params = deepcopy(mopo_params)
 params.update({
     'domain': 'walker2d',
     'task': 'medium-expert-v0',
-    'exp_name': 'walker2d_medium_expert'
+    'exp_name': 'walker2d_medium_expert_MOPO'
 })
 params['kwargs'].update({
     'pool_load_path': 'd4rl/walker2d-medium-expert-v0',

@@ -4,7 +4,7 @@ params = deepcopy(mopo_params)
 params.update({
     'domain': 'halfcheetah',
     'task': 'medium-v0',
-    'exp_name': 'halfcheetah_medium'
+    'exp_name': 'halfcheetah_medium_MOPO'
 })
 params['kwargs'].update({
     'pool_load_path': 'd4rl/halfcheetah-medium-v0',

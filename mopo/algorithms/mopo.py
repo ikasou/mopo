@@ -497,43 +497,43 @@ class MOPO(RLAlgorithm):
         self._iteration_ph = tf.compat.v1.placeholder(
             tf.int64, shape=None, name='iteration')
 
-        self._observations_ph = tf.placeholder(
+        self._observations_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, *self._observation_shape),
             name='observation',
         )
 
-        self._next_observations_ph = tf.placeholder(
+        self._next_observations_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, *self._observation_shape),
             name='next_observation',
         )
 
-        self._actions_ph = tf.placeholder(
+        self._actions_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, *self._action_shape),
             name='actions',
         )
 
-        self._rewards_ph = tf.placeholder(
+        self._rewards_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, 1),
             name='rewards',
         )
 
-        self._terminals_ph = tf.placeholder(
+        self._terminals_ph = tf.compat.v1.placeholder(
             tf.float32,
             shape=(None, 1),
             name='terminals',
         )
 
         if self._store_extra_policy_info:
-            self._log_pis_ph = tf.placeholder(
+            self._log_pis_ph = tf.compat.v1.placeholder(
                 tf.float32,
                 shape=(None, 1),
                 name='log_pis',
             )
-            self._raw_actions_ph = tf.placeholder(
+            self._raw_actions_ph = tf.compat.v1.placeholder(
                 tf.float32,
                 shape=(None, *self._action_shape),
                 name='raw_actions',
@@ -574,7 +574,7 @@ class MOPO(RLAlgorithm):
             for Q in self._Qs)
 
         Q_losses = self._Q_losses = tuple(
-            tf.losses.mean_squared_error(
+            tf.compat.v1.losses.mean_squared_error(
                 labels=Q_target, predictions=Q_value, weights=0.5)
             for Q_value in Q_values)
 
