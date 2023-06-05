@@ -7,7 +7,7 @@ import numpy as np
 
 def restore_pool(replay_pool, experiment_root, max_size, save_path=None):
     if 'd4rl' in experiment_root:
-        restore_pool_d4rl(replay_pool, experiment_root[5:])
+        restore_pool_d4rl(replay_pool, experiment_root)
     else:
         assert os.path.exists(experiment_root)
         if os.path.isdir(experiment_root):
@@ -23,7 +23,17 @@ def restore_pool(replay_pool, experiment_root, max_size, save_path=None):
 def restore_pool_d4rl(replay_pool, name):
     import gym
     import d4rl
-    data = d4rl.qlearning_dataset(gym.make(name))
+    if '.hdf5' == name[-5:]:
+        import h5py
+        with h5py.File(name, 'r') as f:
+            dataset = {k: np.array(v) for k, v in f.items()}
+        name = name.split('/')[-1].replace('.hdf5', '').replace('_', '-')
+        name = name.replace('-first', '').replace('-half', '').replace('-plus-unlabeled-to-min', '')
+        name += '-v0'
+    else:
+        dataset = None
+        name = name[5:]
+    data = d4rl.qlearning_dataset(gym.make(name), dataset=dataset)
     data['rewards'] = np.expand_dims(data['rewards'], axis=1)
     data['terminals'] = np.expand_dims(data['terminals'], axis=1)
     replay_pool.add_samples(data)
