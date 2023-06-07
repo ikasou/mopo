@@ -28,7 +28,7 @@ def get_environment(universe, domain, task, environment_params):
 def get_environment_from_params(environment_params):
     universe = environment_params['universe']
     task = environment_params['task']
-    task = task.replace('-first', '').replace('-half', '').replace('-plus-unlabeled', '')
+    task = task.replace('-first', '').replace('-half', '').replace('-plus-unlabeled', '').replace('-to-nan', '')
     domain = environment_params['domain']
     environment_kwargs = environment_params.get('kwargs', {}).copy()
 

@@ -28,7 +28,8 @@ def restore_pool_d4rl(replay_pool, name):
         with h5py.File(name, 'r') as f:
             dataset = {k: np.array(v) for k, v in f.items()}
         name = name.split('/')[-1].replace('.hdf5', '').replace('_', '-')
-        name = name.replace('-first', '').replace('-half', '').replace('-plus-unlabeled-to-min', '')
+        name = name.replace('-first', '').replace('-half', '')
+        name = name.replace('-plus-unlabeled', '').replace('-to-min', '').replace('-to-nan', '')
         name += '-v0'
     else:
         dataset = None

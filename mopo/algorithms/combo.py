@@ -406,6 +406,11 @@ class COMBO(RLAlgorithm):
             model_metrics = {}
         else:
             env_samples = self._pool.return_all_samples()
+            where_nan = np.isnan(env_samples['rewards'])
+            if any(where_nan):
+                print(f'[ COMBO ] Filling-in {sum(where_nan)} missing reward values using model predictions')
+                     #  at epoch {} | freq {} | timestep {} (total: {})'.format(
+   
             train_inputs, train_outputs = format_samples_for_training(env_samples)
             model_metrics = self._model.train(train_inputs, train_outputs, **kwargs)
         return model_metrics
@@ -470,6 +475,16 @@ class COMBO(RLAlgorithm):
 
         ## can sample from the env pool even if env_batch_size == 0
         env_batch = self._pool.random_batch(env_batch_size)
+        ## Provide pseudo labels for rewards using model
+        mask_nans = np.isnan(env_batch['rewards']).squeeze()
+        if mask_nans.any():
+            inputs = np.concatenate((
+                env_batch['observations'][mask_nans],
+                env_batch['actions'][mask_nans]),
+                1)
+            outputs = self._model.predict(inputs)
+            unlabeled_rewards = outputs[0][:, 0, None]
+            env_batch['rewards'][mask_nans] = unlabeled_rewards
 
         if model_batch_size > 0:
             model_batch = self._model_pool.random_batch(model_batch_size)
@@ -589,18 +604,6 @@ class COMBO(RLAlgorithm):
                 Q([self._observations_ph, random_actions])
                 for random_actions in random_actions_all), -1)
             for _, Q in enumerate(self._Qs))
-        # CQL_Q_losses = self._CQL_Q_losses = tuple(
-        #     tf.reduce_logsumexp(
-        #         tf.stack(
-        #             tuple(Q([self._observations_ph, random_actions])/temperature
-        #             for random_actions in random_actions_all),
-        #             axis=1
-        #         ),
-        #         axis=1
-        #     )*temperature - Q_values[i]
-        #     for i, Q in enumerate(self._Qs))
-            
-        ###########################################################
         curr_actions_all = tuple(
             self._policy.actions([self._observations_ph])
             for _ in range(self._num_cql_random_actions))

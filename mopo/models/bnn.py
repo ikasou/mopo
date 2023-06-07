@@ -317,7 +317,7 @@ class BNN:
                 self._save_state(i)
                 updated = True
                 improvement = (best - current) / best
-                # print('epoch {} | updated {} | improvement: {:.4f} | best: {:.4f} | current: {:.4f}'.format(epoch, i, improvement, best, current))
+                print('epoch {} | updated {} | improvement: {:.4f} | best: {:.4f} | current: {:.4f}'.format(epoch, i, improvement, best, current))
         
         if updated:
             self._epochs_since_update = 0
@@ -325,7 +325,7 @@ class BNN:
             self._epochs_since_update += 1
 
         if self._epochs_since_update > self._max_epochs_since_update:
-            # print('[ BNN ] Breaking at epoch {}: {} epochs since update ({} max)'.format(epoch, self._epochs_since_update, self._max_epochs_since_update))
+            print('[ BNN ] Breaking at epoch {}: {} epochs since update ({} max)'.format(epoch, self._epochs_since_update, self._max_epochs_since_update))
             return True
         else:
             return False
@@ -390,87 +390,116 @@ class BNN:
             idxs = np.argsort(np.random.uniform(size=arr.shape), axis=-1)
             return arr[np.arange(arr.shape[0])[:, None], idxs]
 
-        # Split into training and holdout sets
-        num_holdout = min(int(inputs.shape[0] * holdout_ratio), max_logging)
-        permutation = np.random.permutation(inputs.shape[0])
-        inputs, holdout_inputs = inputs[permutation[num_holdout:]], inputs[permutation[:num_holdout]]
-        targets, holdout_targets = targets[permutation[num_holdout:]], targets[permutation[:num_holdout]]
-        holdout_inputs = np.tile(holdout_inputs[None], [self.num_nets, 1, 1])
-        holdout_targets = np.tile(holdout_targets[None], [self.num_nets, 1, 1])
+        # Locate pseudo labels for unlabeled rewards
+        raw_inputs, raw_targets = inputs, targets
+        raw_mask_nans = np.isnan(targets[:, 0])   # see fake_env.py, reward is placed as 0'th element of target vec
+        inputs, targets = inputs[~raw_mask_nans], targets[~raw_mask_nans]
+        multi_pass = raw_mask_nans.any()
+        if multi_pass:
+            print(f'[ BNN ] Detected {sum(raw_mask_nans)} unlabeled data points, will run 2-stage calibration')
+        # iterate over data twice, once using only fully labeled data
+        # use results of first iteration to pseudo-label for second iteration
+        for i in range(2 if multi_pass else 1):
+            if i == 0:
+                # Split into training and holdout sets
+                num_holdout = min(int(inputs.shape[0] * holdout_ratio), max_logging)
+                permutation = np.random.permutation(inputs.shape[0])
+                inputs, holdout_inputs = inputs[permutation[num_holdout:]], inputs[permutation[:num_holdout]]
+                targets, holdout_targets = targets[permutation[num_holdout:]], targets[permutation[:num_holdout]]
+                holdout_inputs = np.tile(holdout_inputs[None], [self.num_nets, 1, 1])
+                holdout_targets = np.tile(holdout_targets[None], [self.num_nets, 1, 1])
+                mask_nans = np.isnan(targets[:, 0]) # rewards only
+            elif i == 1:
+                mask_nans = np.concatenate((np.isnan(targets[:, 0]), 
+                    np.isnan(raw_targets[raw_mask_nans][:, 0])), 0) # rewards only
+                inputs = np.concatenate((inputs, raw_inputs[raw_mask_nans]), 0)
+                targets = np.concatenate((targets, raw_targets[raw_mask_nans]), 0)
+            else:
+                raise NotImplementedError('Multiple iterations needs further work.')
 
-        print('[ BNN ] Training {} | Holdout: {}'.format(inputs.shape, holdout_inputs.shape))
-        with self.sess.as_default():
-            self.scaler.fit(inputs)
+            print('[ BNN ] Training {} | Holdout: {}'.format(inputs.shape, holdout_inputs.shape))
+            with self.sess.as_default():
+                self.scaler.fit(inputs)
 
-        idxs = np.random.randint(inputs.shape[0], size=[self.num_nets, inputs.shape[0]])
-        if hide_progress:
-            progress = Silent()
-        else:
-            progress = Progress(max_epochs)
+            idxs = np.random.randint(inputs.shape[0], size=[self.num_nets, inputs.shape[0]])
+            if hide_progress:
+                progress = Silent()
+            else:
+                progress = Progress(max_epochs)
 
-        if max_epochs is not None:
-            epoch_iter = range(max_epochs)
-        else:
-            epoch_iter = itertools.count()
+            if max_epochs is not None:
+                epoch_iter = range(max_epochs)
+            else:
+                epoch_iter = itertools.count()
 
-        # else:
-        #     epoch_range = trange(epochs, unit="epoch(s)", desc="Network training")
+            t0 = time.time()
+            grad_updates = 0
+            for epoch in epoch_iter:
+                for batch_num in range(int(np.ceil(idxs.shape[-1] / batch_size))):
+                    batch_idxs = idxs[:, batch_num * batch_size:(batch_num + 1) * batch_size]
+                    pred_nans = mask_nans[batch_idxs]
+                    if i == 0:
+                        assert not pred_nans.any()
+                    elif pred_nans.any():
+                        missing = np.unique(batch_idxs[pred_nans])
+                        means, vars = self.predict(inputs[missing])
+                        targets[missing, 0] = means[:, 0] # rewards only. Also:
+                        # we could and in fact want to rewrite originally missing values
+                        # as the network trains, so does the quality of the predictions
+                    if np.isnan(targets[batch_idxs]).any():
+                        import ipdb; ipdb.set_trace()
+                    self.sess.run(
+                        self.train_op,
+                        feed_dict={self.sy_train_in: inputs[batch_idxs], self.sy_train_targ: targets[batch_idxs]}
+                    )
+                    grad_updates += 1
 
-        t0 = time.time()
-        grad_updates = 0
-        for epoch in epoch_iter:
-            for batch_num in range(int(np.ceil(idxs.shape[-1] / batch_size))):
-                batch_idxs = idxs[:, batch_num * batch_size:(batch_num + 1) * batch_size]
-                self.sess.run(
-                    self.train_op,
-                    feed_dict={self.sy_train_in: inputs[batch_idxs], self.sy_train_targ: targets[batch_idxs]}
-                )
-                grad_updates += 1
+                idxs = shuffle_rows(idxs)
+                if not hide_progress:
+                    if holdout_ratio < 1e-12:
+                        losses = self.sess.run(
+                                self.mse_loss,
+                                feed_dict={
+                                    self.sy_train_in: inputs[idxs[:, :max_logging]],
+                                    self.sy_train_targ: targets[idxs[:, :max_logging]]
+                                }
+                            )
+                        named_losses = [['M{}'.format(i), losses[i]] for i in range(len(losses))]
+                        progress.set_description(named_losses)
+                    else:
+                        losses = self.sess.run(
+                                self.mse_loss,
+                                feed_dict={
+                                    self.sy_train_in: inputs[idxs[:, :max_logging]],
+                                    self.sy_train_targ: targets[idxs[:, :max_logging]]
+                                }
+                            )
+                        holdout_losses = self.sess.run(
+                                self.mse_loss,
+                                feed_dict={
+                                    self.sy_train_in: holdout_inputs,
+                                    self.sy_train_targ: holdout_targets
+                                }
+                            )
+                        named_losses = [['M{}'.format(i), losses[i]] for i in range(len(losses))]
+                        named_holdout_losses = [['V{}'.format(i), holdout_losses[i]] for i in range(len(holdout_losses))]
+                        named_losses = named_losses + named_holdout_losses + [['T', time.time() - t0]]
+                        progress.set_description(named_losses)
 
-            idxs = shuffle_rows(idxs)
-            if not hide_progress:
-                if holdout_ratio < 1e-12:
-                    losses = self.sess.run(
-                            self.mse_loss,
-                            feed_dict={
-                                self.sy_train_in: inputs[idxs[:, :max_logging]],
-                                self.sy_train_targ: targets[idxs[:, :max_logging]]
-                            }
-                        )
-                    named_losses = [['M{}'.format(i), losses[i]] for i in range(len(losses))]
-                    progress.set_description(named_losses)
-                else:
-                    losses = self.sess.run(
-                            self.mse_loss,
-                            feed_dict={
-                                self.sy_train_in: inputs[idxs[:, :max_logging]],
-                                self.sy_train_targ: targets[idxs[:, :max_logging]]
-                            }
-                        )
-                    holdout_losses = self.sess.run(
-                            self.mse_loss,
-                            feed_dict={
-                                self.sy_train_in: holdout_inputs,
-                                self.sy_train_targ: holdout_targets
-                            }
-                        )
-                    named_losses = [['M{}'.format(i), losses[i]] for i in range(len(losses))]
-                    named_holdout_losses = [['V{}'.format(i), holdout_losses[i]] for i in range(len(holdout_losses))]
-                    named_losses = named_losses + named_holdout_losses + [['T', time.time() - t0]]
-                    progress.set_description(named_losses)
+                        break_train = self._save_best(epoch, holdout_losses)
 
-                    break_train = self._save_best(epoch, holdout_losses)
-
-            progress.update()
-            t = time.time() - t0
-            if break_train or (max_grad_updates and grad_updates > max_grad_updates):
-                break
-            if max_t and t > max_t:
-                descr = 'Breaking because of timeout: {}! (max: {})'.format(t, max_t)
-                progress.append_description(descr)
-                # print('Breaking because of timeout: {}! | (max: {})\n'.format(t, max_t))
-                # time.sleep(5)
-                break
+                progress.update()
+                t = time.time() - t0
+                if break_train or (max_grad_updates and grad_updates > max_grad_updates):
+                    break
+                if max_t and t > max_t:
+                    descr = 'Breaking because of timeout: {}! (max: {})'.format(t, max_t)
+                    progress.append_description(descr)
+                    print('Breaking because of timeout: {}! | (max: {})\n'.format(t, max_t))
+                    # time.sleep(5)
+                    break
+                
+            print(f'[ BNN ] Finished Pass {i}')
 
         progress.stamp()
         if timer: timer.stamp('bnn_train')
